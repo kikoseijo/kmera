@@ -24,7 +24,7 @@ public enum KMeraFlashMode: Int {
 }
 
 public enum KMeraFocusMode: Int {
-    case off, on, auto
+    case locked, autoFocus, continuousAutoFocus
 }
 
 public enum KMeraOutputMode {
@@ -36,7 +36,7 @@ public enum KMeraOutputQuality: Int {
 }
 
 enum KMeraSafeUpdateModes {
-    case zoom, focus, torch
+    case zoom, torch, flash, focus, focusmode
 }
 
 
@@ -48,7 +48,30 @@ open class KMera: NSObject {
     open var kSession: AVCaptureSession?
     open var showDebug = false
     open var displayAccessPermissions = true
-    open var torchLevel = 0.1
+    
+    open var torchLevel : CGFloat = 0.10 {
+        didSet {
+            if torchLevel != oldValue {
+                applyTorch(torchLevel)
+            }
+        }
+    }
+    open var zoomValue: CGFloat = 1.0 {
+        didSet {
+            if zoomValue != oldValue {
+                applyZoom(zoomValue)
+            }
+        }
+    }
+    
+    open var focusValue: CGFloat = 0.01 {
+        didSet {
+            if focusValue != oldValue {
+                applyFocus()
+            }
+        }
+    }
+    
     open var printLog:(_ title: String, _ msg: String) -> Void = { (title: String, msg: String) -> Void in
         
         var alert = UIAlertController(title: title, message: msg, preferredStyle: .alert)
@@ -102,24 +125,35 @@ open class KMera: NSObject {
     }()
     
     /// Property to change camera device between front and back.
-    open var cameraDevice = KMeraDevice.back {
+    open var cameraDevice : KMeraDevice = .back {
         didSet {
             if cameraIsSetup {
                 if cameraDevice != oldValue {
                     changeCamera(cameraDevice)
                     updateMaxZoomScale()
-                    applyZoom(0)
+                    applyZoom(zoomValue)
                 }
             }
         }
     }
     
     /// Property to change camera flash mode.
-    open var flashMode = KMeraFlashMode.off {
+    open var flashMode : KMeraFlashMode = .off {
         didSet {
             if cameraIsSetup {
                 if flashMode != oldValue {
-                    changeFlashMode(flashMode)
+                    safeChangeFlashMode()
+                }
+            }
+        }
+    }
+    
+    /// Property to change camera flash mode.
+    open var focusMode: KMeraFocusMode = .locked {
+        didSet {
+            if cameraIsSetup {
+                if focusMode != oldValue {
+                    safeChangeFocusMode()
                 }
             }
         }
@@ -144,7 +178,7 @@ open class KMera: NSObject {
                     _setupOutputMode(cameraOutputMode, oldCameraOutputMode: oldValue)
                 }
                 updateMaxZoomScale()
-                applyZoom(0)
+                applyZoom(zoomValue)
             }
         }
     }
@@ -161,7 +195,7 @@ open class KMera: NSObject {
     fileprivate weak var embeddingView: UIView?
     fileprivate var videoCompletion: ((_ videoURL: URL?, _ error: NSError?) -> Void)?
     
-    fileprivate var sessionQueue: DispatchQueue = DispatchQueue(label: "CameraSessionQueue", attributes: [])
+    fileprivate var sessionQueue: DispatchQueue = DispatchQueue(label: "KMeraSessionQueue", attributes: [])
     
     fileprivate lazy var frontCameraDevice: AVCaptureDevice? = {
         let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo) as! [AVCaptureDevice]
@@ -188,6 +222,10 @@ open class KMera: NSObject {
     fileprivate var zoomScale       = CGFloat(1.0)
     fileprivate var beginZoomScale  = CGFloat(1.0)
     fileprivate var maxZoomScale    = CGFloat(1.0)
+    
+    fileprivate var minGenericScale  = CGFloat(0.00)
+    fileprivate var maxGenericScale    = CGFloat(1.0)
+    
     
     fileprivate var tempFilePath: URL = {
         let tempPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("tempMovie").appendingPathExtension("mp4").absoluteString
@@ -337,55 +375,86 @@ open class KMera: NSObject {
         return flashMode
     }
    
-    open func changeQualityMode() -> KMeraOutputQuality {
+    public func changeQualityMode() -> KMeraOutputQuality {
         cameraOutputQuality = KMeraOutputQuality(rawValue: (cameraOutputQuality.rawValue+1)%3)!
         return cameraOutputQuality
     }
     
-    // MARK: -
-    
-    
-    
-    fileprivate func saveVideoToLibrary(_ fileURL: URL) {
-        if let validLibrary = library {
-            validLibrary.performChanges({
-                
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
-            }, completionHandler: { success, error in
-                if (error != nil) {
-                    self.log(NSLocalizedString("Unable to save video to the iPhone.", comment:""), message: error!.localizedDescription)
-                    self._executeVideoCompletionWithURL(nil, error: error as NSError?)
-                } else {
-                    self._executeVideoCompletionWithURL(fileURL, error: error as NSError?)
-                }
-            })
-        }
+    public func changeFocusMode() -> KMeraFocusMode {
+        focusMode = KMeraFocusMode(rawValue: (focusMode.rawValue+1)%3)!
+        return focusMode
     }
     
     
+    
+    
+    
+    fileprivate func applyTorch(_ scale: CGFloat) {
+        if scale < maxGenericScale, scale >= minGenericScale {
+            safeChangeCameraValue(.torch)
+            print("New Torch value: \(scale)")
+        } else {
+            print("New Torch value NO AVAILABLE: \(scale)")
+        }
+    }
     
     fileprivate func applyZoom(_ scale: CGFloat) {
         zoomScale = max(1.0, min(beginZoomScale * scale, maxZoomScale))
-        safeChangeCameraValue(.zoom, newValue: zoomScale)
+        safeChangeCameraValue(.zoom)
+        print("New Zoom value: \(zoomScale)")
     }
     
-    fileprivate func safeChangeCameraValue(_ valueMode: KMeraSafeUpdateModes, newValue: CGFloat){
-        do {
-            let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice
-            try captureDevice?.lockForConfiguration()
+    fileprivate func applyFocus() {
+        if focusValue < maxGenericScale, focusValue > minGenericScale {
+            safeChangeCameraValue(.focus)
+            print("New Focus value: \(focusValue)")
+        } else {
+            print("New Focus NO AVAILABLE: \(focusValue)")
+        }
+        
+        
+    }
+    
+    fileprivate func safeChangeCameraValue(_ valueMode: KMeraSafeUpdateModes){
+        print("safeChangeCameraValue: \(valueMode)")
+        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice {
+            
+            do {
+                try captureDevice.lockForConfiguration()
+            } catch {
+                print("Error locking configuration")
+            }
             
             switch valueMode {
             case .zoom:
-                captureDevice?.videoZoomFactor = newValue
+                captureDevice.ramp(toVideoZoomFactor: zoomScale, withRate: 1.5)
             case .torch:
-                try! captureDevice?.setTorchModeOnWithLevel(Float(newValue))
+                if torchLevel == 0.0 {
+                    try! captureDevice.torchMode = .off
+                } else {
+                    try! captureDevice.setTorchModeOnWithLevel(Float(torchLevel))
+                }
+            case .focus:
+                try! captureDevice.setFocusModeLockedWithLensPosition(Float(focusValue), completionHandler: nil)
+            case .focusmode:
+                if let avFocusMode = AVCaptureFocusMode(rawValue: focusMode.rawValue), captureDevice.isFocusModeSupported(avFocusMode) {
+                    try! captureDevice.focusMode = avFocusMode
+                } else {
+                    print("Focus mode not available as a settings.")
+                }
+            case .flash:
+                if let avFlashMode = AVCaptureFlashMode(rawValue: focusMode.rawValue), captureDevice.isFlashModeSupported(avFlashMode) {
+                    try! captureDevice.flashMode = avFlashMode
+                } else {
+                    print("Flash mode not available as a settings.")
+                }
             default: break
-                
+                    
             }
-            captureDevice?.unlockForConfiguration()
-        } catch {
-            print("Error locking configuration")
+            captureDevice.unlockForConfiguration()
         }
+        
+        
         
     }
     
@@ -495,7 +564,7 @@ open class KMera: NSObject {
                 self._setupOutputMode(self.cameraOutputMode, oldCameraOutputMode: nil)
                 self._setupPreviewLayer()
                 validCaptureSession.commitConfiguration()
-                self.changeFlashMode(self.flashMode)
+                self.safeChangeFlashMode()
                 self.changeQualityMode(self.cameraOutputQuality)
                 validCaptureSession.startRunning()
                 self.addOrientationObserver()
@@ -537,7 +606,6 @@ open class KMera: NSObject {
     fileprivate func updateMaxZoomScale() {
         var maxZoom = CGFloat(1.0)
         beginZoomScale = CGFloat(1.0)
-        
         if cameraDevice == .back {
             maxZoom = (backCameraDevice?.activeFormat.videoMaxZoomFactor)!
         }
@@ -670,26 +738,27 @@ open class KMera: NSObject {
         }
     }
     
-    fileprivate func changeFlashMode(_ flashMode: KMeraFlashMode) {
-        kSession?.beginConfiguration()
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-        for  device in devices!  {
-            let captureDevice = device as! AVCaptureDevice
-            if (captureDevice.position == AVCaptureDevicePosition.back) {
-                let avFlashMode = AVCaptureFlashMode(rawValue: flashMode.rawValue)
-                if (captureDevice.isFlashModeSupported(avFlashMode!)) {
-                    do {
-                        try captureDevice.lockForConfiguration()
-                    } catch {
-                        return
-                    }
-                    captureDevice.flashMode = avFlashMode!
-                    captureDevice.unlockForConfiguration()
-                }
+    fileprivate func safeChangeFlashMode() {
+        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice{
+            if captureDevice.position == AVCaptureDevicePosition.back {
+                safeChangeCameraValue(.flash)
             }
         }
-        kSession?.commitConfiguration()
     }
+    
+    fileprivate func safeChangeFocusMode() {
+        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice{
+            if captureDevice.position == AVCaptureDevicePosition.back {
+                if focusMode == .locked {
+                    safeChangeCameraValue(.focus)
+                } else {
+                    safeChangeCameraValue(.focusmode)
+                }
+                    
+            }
+        }
+    }
+
     
     fileprivate func changeQualityMode(_ newCameraOutputQuality: KMeraOutputQuality) {
         if let validCaptureSession = kSession {
@@ -860,6 +929,22 @@ extension KMera: AVCaptureFileOutputRecordingDelegate {
             } else {
                 _executeVideoCompletionWithURL(outputFileURL, error: error as NSError?)
             }
+        }
+    }
+    
+    private func saveVideoToLibrary(_ fileURL: URL) {
+        if let validLibrary = library {
+            validLibrary.performChanges({
+                
+                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: fileURL)
+            }, completionHandler: { success, error in
+                if (error != nil) {
+                    self.log(NSLocalizedString("Unable to save video to the iPhone.", comment:""), message: error!.localizedDescription)
+                    self._executeVideoCompletionWithURL(nil, error: error as NSError?)
+                } else {
+                    self._executeVideoCompletionWithURL(fileURL, error: error as NSError?)
+                }
+            })
         }
     }
 }
