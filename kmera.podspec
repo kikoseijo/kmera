@@ -4,7 +4,7 @@ Pod::Spec.new do |s|
   s.summary          = "Swift class to access camera devices to record and shoot photos."
   s.requires_arc     = true
   s.homepage         = "https://github.com/kikoseijo/kmera"
-  s.license          = 'MIT'
+  s.license          = { :type => 'MIT', :file => 'LICENSE' }
   s.author           = { "Kiko Seijo" => "kiko@sunnyface.com" }
   s.source           = { :git => "https://github.com/kikoseijo/kmera.git", :tag => "1.0.0" }
   s.social_media_url = 'http://www.sunnyface.com/'
