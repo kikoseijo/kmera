@@ -10,7 +10,6 @@ import UIKit
 import Photos
 import AVFoundation
 
-
 public enum KMeraState {
     case ready, accessDenied, noDeviceFound, notDetermined
 }
@@ -49,28 +48,41 @@ open class KMera: NSObject {
     open var showDebug = false
     open var displayAccessPermissions = true
     
-    open var torchLevel : CGFloat = 0.10 {
+    open dynamic var obsLensPosition: String = ""
+    open dynamic var obsExposureDuration: String = ""
+    open dynamic var obsISO: String = ""
+    open dynamic var obsDeviceWhiteBalanceGains: String = ""
+    
+    open var torchLevel : Float = 0.00 {
         didSet {
-            if torchLevel != oldValue {
-                applyTorch(torchLevel)
+            if cameraIsSetup {
+                if torchLevel != oldValue {
+                    applyTorch(torchLevel)
+                }
             }
         }
     }
     open var zoomValue: CGFloat = 1.0 {
         didSet {
-            if zoomValue != oldValue {
-                applyZoom(zoomValue)
+            if cameraIsSetup {
+                if zoomValue != oldValue {
+                    applyZoom(zoomValue)
+                }
             }
         }
     }
     
     open var focusValue: CGFloat = 0.01 {
         didSet {
-            if focusValue != oldValue {
-                applyFocus()
+            if cameraIsSetup {
+                if focusValue != oldValue {
+                    applyFocus()
+                }
             }
         }
     }
+    
+    
     
     open var printLog:(_ title: String, _ msg: String) -> Void = { (title: String, msg: String) -> Void in
         
@@ -99,6 +111,8 @@ open class KMera: NSObject {
             return cameraIsSetup
         }
     }
+    
+    
     
     /// The Bool property to determine if current device has front camera.
     open var hasFrontCamera: Bool = {
@@ -130,7 +144,7 @@ open class KMera: NSObject {
             if cameraIsSetup {
                 if cameraDevice != oldValue {
                     changeCamera(cameraDevice)
-                    updateMaxZoomScale()
+                    maxZoomScale = (currentCameraDevice?.activeFormat.videoMaxZoomFactor)!
                     applyZoom(zoomValue)
                 }
             }
@@ -177,7 +191,7 @@ open class KMera: NSObject {
                 if cameraOutputMode != oldValue {
                     _setupOutputMode(cameraOutputMode, oldCameraOutputMode: oldValue)
                 }
-                updateMaxZoomScale()
+                maxZoomScale = (currentCameraDevice?.activeFormat.videoMaxZoomFactor)!
                 applyZoom(zoomValue)
             }
         }
@@ -197,20 +211,7 @@ open class KMera: NSObject {
     
     fileprivate var sessionQueue: DispatchQueue = DispatchQueue(label: "KMeraSessionQueue", attributes: [])
     
-    fileprivate lazy var frontCameraDevice: AVCaptureDevice? = {
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo) as! [AVCaptureDevice]
-        return devices.filter{$0.position == .front}.first
-    }()
-    
-    fileprivate lazy var backCameraDevice: AVCaptureDevice? = {
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo) as! [AVCaptureDevice]
-        return devices.filter{$0.position == .back}.first
-    }()
-    
-    fileprivate lazy var mic: AVCaptureDevice? = {
-        return AVCaptureDevice.defaultDevice(withMediaType: AVMediaTypeAudio)
-    }()
-    
+    fileprivate var currentCameraDevice:AVCaptureDevice?
     fileprivate var stillImageOutput: AVCaptureStillImageOutput?
     fileprivate var movieOutput: AVCaptureMovieFileOutput?
     fileprivate var previewLayer: AVCaptureVideoPreviewLayer?
@@ -226,6 +227,10 @@ open class KMera: NSObject {
     fileprivate var minGenericScale  = CGFloat(0.00)
     fileprivate var maxGenericScale    = CGFloat(1.0)
     
+    fileprivate var backKamera:AVCaptureDevice?
+    fileprivate var frontKamera:AVCaptureDevice?
+    fileprivate lazy var mic: AVCaptureDevice = AVCaptureDevice.defaultDevice(withMediaType: AVMediaTypeAudio)
+    
     
     fileprivate var tempFilePath: URL = {
         let tempPath = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("tempMovie").appendingPathExtension("mp4").absoluteString
@@ -239,7 +244,7 @@ open class KMera: NSObject {
     
     
     // MARK: - KMera
-    
+   
     
     open func addPreviewLayerToView(_ view: UIView) -> KMeraState {
         return addPreviewLayerToView(view, newCameraOutputMode: cameraOutputMode)
@@ -262,7 +267,7 @@ open class KMera: NSObject {
                     validCompletion()
                 }
             } else {
-                _setupCamera({ Void -> Void in
+                setupCamera({ Void -> Void in
                     self.addPreviewLayer(view)
                     self.cameraOutputMode = newCameraOutputMode
                     if let validCompletion = completion {
@@ -314,7 +319,7 @@ open class KMera: NSObject {
                 if cameraIsSetup {
                     stopAndRemoveCaptureSession()
                 }
-                _setupCamera({Void -> Void in
+                setupCamera({Void -> Void in
                     if let validEmbeddingView = self.embeddingView {
                         self.addPreviewLayer(validEmbeddingView)
                     }
@@ -333,9 +338,9 @@ open class KMera: NSObject {
         cameraIsSetup = false
         previewLayer = nil
         kSession = nil
-        frontCameraDevice = nil
-        backCameraDevice = nil
-        mic = nil
+//        frontCameraDevice = nil
+//        backCameraDevice = nil
+//        mic = nil
         stillImageOutput = nil
         movieOutput = nil
     }
@@ -347,7 +352,7 @@ open class KMera: NSObject {
      */
     open func startRecordingVideo() {
         if cameraOutputMode != .stillImage {
-            _getMovieOutput().startRecording(toOutputFileURL: tempFilePath, recordingDelegate: self)
+            getMovieOutput().startRecording(toOutputFileURL: tempFilePath, recordingDelegate: self)
         } else {
             log(NSLocalizedString("Capture session output still image", comment:""), message: NSLocalizedString("I can only take pictures", comment:""))
         }
@@ -389,10 +394,9 @@ open class KMera: NSObject {
     
     
     
-    fileprivate func applyTorch(_ scale: CGFloat) {
-        if scale < maxGenericScale, scale >= minGenericScale {
-            safeChangeCameraValue(.torch)
-            print("New Torch value: \(scale)")
+    fileprivate func applyTorch(_ scale: Float) {
+        if scale < 1.0, scale >= 0.01 {
+            safeChangeCameraValue(.torch, captureDevice: currentCameraDevice!)
         } else {
             print("New Torch value NO AVAILABLE: \(scale)")
         }
@@ -400,14 +404,12 @@ open class KMera: NSObject {
     
     fileprivate func applyZoom(_ scale: CGFloat) {
         zoomScale = max(1.0, min(beginZoomScale * scale, maxZoomScale))
-        safeChangeCameraValue(.zoom)
-        print("New Zoom value: \(zoomScale)")
+        safeChangeCameraValue(.zoom, captureDevice: currentCameraDevice!)
     }
     
     fileprivate func applyFocus() {
         if focusValue < maxGenericScale, focusValue > minGenericScale {
-            safeChangeCameraValue(.focus)
-            print("New Focus value: \(focusValue)")
+            safeChangeCameraValue(.focus, captureDevice: currentCameraDevice!)
         } else {
             print("New Focus NO AVAILABLE: \(focusValue)")
         }
@@ -415,9 +417,7 @@ open class KMera: NSObject {
         
     }
     
-    fileprivate func safeChangeCameraValue(_ valueMode: KMeraSafeUpdateModes){
-        print("safeChangeCameraValue: \(valueMode)")
-        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice {
+    fileprivate func safeChangeCameraValue(_ valueMode: KMeraSafeUpdateModes, captureDevice: AVCaptureDevice){
             
             do {
                 try captureDevice.lockForConfiguration()
@@ -430,42 +430,38 @@ open class KMera: NSObject {
                 captureDevice.ramp(toVideoZoomFactor: zoomScale, withRate: 1.5)
             case .torch:
                 if torchLevel == 0.0 {
-                    try! captureDevice.torchMode = .off
+                    captureDevice.torchMode = .off
                 } else {
-                    try! captureDevice.setTorchModeOnWithLevel(Float(torchLevel))
+                    try! captureDevice.setTorchModeOnWithLevel(torchLevel)
+                    print("TorchLevel: \(torchLevel)")
+                    
                 }
             case .focus:
-                try! captureDevice.setFocusModeLockedWithLensPosition(Float(focusValue), completionHandler: nil)
+                captureDevice.setFocusModeLockedWithLensPosition(Float(focusValue), completionHandler: nil)
             case .focusmode:
                 if let avFocusMode = AVCaptureFocusMode(rawValue: focusMode.rawValue), captureDevice.isFocusModeSupported(avFocusMode) {
-                    try! captureDevice.focusMode = avFocusMode
+                    captureDevice.focusMode = avFocusMode
                 } else {
                     print("Focus mode not available as a settings.")
                 }
             case .flash:
                 if let avFlashMode = AVCaptureFlashMode(rawValue: focusMode.rawValue), captureDevice.isFlashModeSupported(avFlashMode) {
-                    try! captureDevice.flashMode = avFlashMode
+                    captureDevice.flashMode = avFlashMode
                 } else {
                     print("Flash mode not available as a settings.")
                 }
-            default: break
-                    
             }
             captureDevice.unlockForConfiguration()
-        }
-        
-        
-        
     }
     
-    fileprivate func _executeVideoCompletionWithURL(_ url: URL?, error: NSError?) {
+    fileprivate func executeVideoCompletionWithURL(_ url: URL?, error: NSError?) {
         if let validCompletion = videoCompletion {
             validCompletion(url, error)
             videoCompletion = nil
         }
     }
     
-    fileprivate func _getMovieOutput() -> AVCaptureMovieFileOutput {
+    fileprivate func getMovieOutput() -> AVCaptureMovieFileOutput {
         var shouldReinitializeMovieOutput = movieOutput == nil
         if !shouldReinitializeMovieOutput {
             if let connection = movieOutput!.connection(withMediaType: AVMediaTypeVideo) {
@@ -488,7 +484,7 @@ open class KMera: NSObject {
         return movieOutput!
     }
     
-    fileprivate func _getStillImageOutput() -> AVCaptureStillImageOutput {
+    fileprivate func getStillImageOutput() -> AVCaptureStillImageOutput {
         var shouldReinitializeStillImageOutput = stillImageOutput == nil
         if !shouldReinitializeStillImageOutput {
             if let connection = stillImageOutput!.connection(withMediaType: AVMediaTypeVideo) {
@@ -509,13 +505,13 @@ open class KMera: NSObject {
         return stillImageOutput!
     }
     
-    @objc fileprivate func _orientationChanged() {
+    @objc fileprivate func orientationChanged() {
         var currentConnection: AVCaptureConnection?;
         switch cameraOutputMode {
         case .stillImage:
             currentConnection = stillImageOutput?.connection(withMediaType: AVMediaTypeVideo)
         case .videoOnly, .videoWithMic:
-            currentConnection = _getMovieOutput().connection(withMediaType: AVMediaTypeVideo)
+            currentConnection = getMovieOutput().connection(withMediaType: AVMediaTypeVideo)
         }
         if let validPreviewLayer = previewLayer {
             if let validPreviewLayerConnection = validPreviewLayer.connection {
@@ -552,15 +548,27 @@ open class KMera: NSObject {
         return currentCameraState == .ready || (currentCameraState == .notDetermined && displayAccessPermissions)
     }
     
-    fileprivate func _setupCamera(_ completion: @escaping (Void) -> Void) {
+    fileprivate func setupCamera(_ completion: @escaping (Void) -> Void) {
         kSession = AVCaptureSession()
         
         sessionQueue.async(execute: {
+            
+            print("[KMera] init()")
+            let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
+            for device in devices as! [AVCaptureDevice] {
+                if device.position == .back {
+                    self.backKamera = device
+                }
+                else if device.position == .front {
+                    self.frontKamera = device
+                }
+            }
+            
             if let validCaptureSession = self.kSession {
                 validCaptureSession.beginConfiguration()
                 validCaptureSession.sessionPreset = AVCaptureSessionPresetHigh
                 self.changeCamera(self.cameraDevice)
-                self._setupOutputs()
+                self.setupOutputs()
                 self._setupOutputMode(self.cameraOutputMode, oldCameraOutputMode: nil)
                 self._setupPreviewLayer()
                 validCaptureSession.commitConfiguration()
@@ -569,7 +577,7 @@ open class KMera: NSObject {
                 validCaptureSession.startRunning()
                 self.addOrientationObserver()
                 self.cameraIsSetup = true
-                self._orientationChanged()
+                self.orientationChanged()
                 
                 completion()
             }
@@ -578,7 +586,7 @@ open class KMera: NSObject {
     
     fileprivate func addOrientationObserver() {
         if enableOrientationChanges && !cameraIsObservingDeviceOrientation {
-            NotificationCenter.default.addObserver(self, selector: #selector(KMera._orientationChanged), name: NSNotification.Name.UIDeviceOrientationDidChange, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(KMera.orientationChanged), name: NSNotification.Name.UIDeviceOrientationDidChange, object: nil)
             cameraIsObservingDeviceOrientation = true
         }
     }
@@ -593,6 +601,8 @@ open class KMera: NSObject {
     fileprivate func addPreviewLayer(_ view: UIView) {
         embeddingView = view
         attachZoom(view)
+        
+        //observeValues()
         DispatchQueue.main.async(execute: { () -> Void in
             guard let _ = self.previewLayer else {
                 return
@@ -601,19 +611,6 @@ open class KMera: NSObject {
             view.clipsToBounds = true
             view.layer.addSublayer(self.previewLayer!)
         })
-    }
-    
-    fileprivate func updateMaxZoomScale() {
-        var maxZoom = CGFloat(1.0)
-        beginZoomScale = CGFloat(1.0)
-        if cameraDevice == .back {
-            maxZoom = (backCameraDevice?.activeFormat.videoMaxZoomFactor)!
-        }
-        else if cameraDevice == .front {
-            maxZoom = (frontCameraDevice?.activeFormat.videoMaxZoomFactor)!
-        }
-        
-        maxZoomScale = maxZoom
     }
     
     fileprivate func isCameraAvailable() -> KMeraState {
@@ -659,7 +656,7 @@ open class KMera: NSObject {
         switch newCameraOutputMode {
         case .stillImage:
             if (stillImageOutput == nil) {
-                _setupOutputs()
+                setupOutputs()
             }
             if let validStillImageOutput = stillImageOutput {
                 if let kSession = kSession {
@@ -669,7 +666,7 @@ open class KMera: NSObject {
                 }
             }
         case .videoOnly, .videoWithMic:
-            kSession?.addOutput(_getMovieOutput())
+            kSession?.addOutput(getMovieOutput())
             
             if newCameraOutputMode == .videoWithMic {
                 if let validMic = getInputDevice(mic) {
@@ -679,10 +676,10 @@ open class KMera: NSObject {
         }
         kSession?.commitConfiguration()
         changeQualityMode(cameraOutputQuality)
-        _orientationChanged()
+        orientationChanged()
     }
     
-    fileprivate func _setupOutputs() {
+    fileprivate func setupOutputs() {
         if (stillImageOutput == nil) {
             stillImageOutput = AVCaptureStillImageOutput()
         }
@@ -709,29 +706,36 @@ open class KMera: NSObject {
             
             for input in inputs {
                 if let deviceInput = input as? AVCaptureDeviceInput {
-                    if deviceInput.device == backCameraDevice && cameraDevice == .front {
+                    if deviceInput.device == backKamera && cameraDevice == .front {
                         validCaptureSession.removeInput(deviceInput)
                         break;
-                    } else if deviceInput.device == frontCameraDevice && cameraDevice == .back {
+                    } else if deviceInput.device == frontKamera && cameraDevice == .back {
                         validCaptureSession.removeInput(deviceInput)
                         break;
                     }
                 }
             }
+            
+            
+            
+            
+            
             switch cameraDevice {
             case .front:
                 if hasFrontCamera {
-                    if let validFrontDevice = getInputDevice(frontCameraDevice) {
-                        if !inputs.contains(validFrontDevice) {
-                            validCaptureSession.addInput(validFrontDevice)
+                    if let inputDevice = getInputDevice(frontKamera) {
+                        if !inputs.contains(inputDevice) {
+                            validCaptureSession.addInput(inputDevice)
                         }
+                        currentCameraDevice = frontKamera
                     }
                 }
             case .back:
-                if let validBackDevice = getInputDevice(backCameraDevice) {
-                    if !inputs.contains(validBackDevice) {
-                        validCaptureSession.addInput(validBackDevice)
+                if let inputDevice = getInputDevice(backKamera) {
+                    if !inputs.contains(inputDevice) {
+                        validCaptureSession.addInput(inputDevice)
                     }
+                    currentCameraDevice = backKamera
                 }
             }
             validCaptureSession.commitConfiguration()
@@ -739,24 +743,47 @@ open class KMera: NSObject {
     }
     
     fileprivate func safeChangeFlashMode() {
-        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice{
-            if captureDevice.position == AVCaptureDevicePosition.back {
-                safeChangeCameraValue(.flash)
+        kSession?.beginConfiguration()
+        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
+        for  device in devices!  {
+            let captureDevice = device as! AVCaptureDevice
+            if (captureDevice.position == AVCaptureDevicePosition.back) {
+                let avFlashMode = AVCaptureFlashMode(rawValue: flashMode.rawValue)
+                if (captureDevice.isFlashModeSupported(avFlashMode!)) {
+                    do {
+                        try captureDevice.lockForConfiguration()
+                    } catch {
+                        return
+                    }
+                    captureDevice.flashMode = avFlashMode!
+                    captureDevice.unlockForConfiguration()
+                }
             }
         }
+        kSession?.commitConfiguration()
     }
     
+    
     fileprivate func safeChangeFocusMode() {
-        if let captureDevice = AVCaptureDevice.devices().first as? AVCaptureDevice{
-            if captureDevice.position == AVCaptureDevicePosition.back {
-                if focusMode == .locked {
-                    safeChangeCameraValue(.focus)
-                } else {
-                    safeChangeCameraValue(.focusmode)
+        kSession?.beginConfiguration()
+        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
+        for  device in devices!  {
+            let captureDevice = device as! AVCaptureDevice
+            if (captureDevice.position == AVCaptureDevicePosition.back) {
+                let avFocusMode = AVCaptureFocusMode(rawValue: focusMode.rawValue)
+                if (captureDevice.isFocusModeSupported(avFocusMode!)) {
+                    if focusMode == .locked {
+                        safeChangeCameraValue(.focus, captureDevice: captureDevice)
+                    } else {
+                        safeChangeCameraValue(.focusmode, captureDevice: captureDevice)
+                    }
                 }
-                    
+            
             }
+            
         }
+        kSession?.commitConfiguration()
+        
     }
 
     
@@ -821,6 +848,8 @@ open class KMera: NSObject {
     deinit {
         stopAndRemoveCaptureSession()
         removeOrientationObserver()
+        
+        //unobserveValues()
     }
 }
 
@@ -834,7 +863,7 @@ extension KMera {
      
      :param: imageCompletion Completion block containing the captured UIImage
      */
-    open func capturePictureWithCompletion(_ imageCompletion: @escaping (UIImage?, NSError?) -> Void) {
+    open func capturePictureWithCompletion(_ imageCompletion: @escaping (Data?, NSError?) -> Void) {
         self.capturePictureDataWithCompletion { data, error in
             
             guard error == nil, let imageData = data else {
@@ -855,7 +884,7 @@ extension KMera {
                     })
                 })
             }
-            imageCompletion(UIImage(data: imageData), nil)
+            imageCompletion(imageData, nil)
         }
     }
     
@@ -877,7 +906,7 @@ extension KMera {
         }
         
         sessionQueue.async(execute: {
-            self._getStillImageOutput().captureStillImageAsynchronously(from: self._getStillImageOutput().connection(withMediaType: AVMediaTypeVideo), completionHandler: { [unowned self] sample, error in
+            self.getStillImageOutput().captureStillImageAsynchronously(from: self.getStillImageOutput().connection(withMediaType: AVMediaTypeVideo), completionHandler: { [unowned self] sample, error in
                 
                 
                 guard error == nil else {
@@ -927,7 +956,7 @@ extension KMera: AVCaptureFileOutputRecordingDelegate {
                 }
                 
             } else {
-                _executeVideoCompletionWithURL(outputFileURL, error: error as NSError?)
+                executeVideoCompletionWithURL(outputFileURL, error: error as NSError?)
             }
         }
     }
@@ -940,11 +969,61 @@ extension KMera: AVCaptureFileOutputRecordingDelegate {
             }, completionHandler: { success, error in
                 if (error != nil) {
                     self.log(NSLocalizedString("Unable to save video to the iPhone.", comment:""), message: error!.localizedDescription)
-                    self._executeVideoCompletionWithURL(nil, error: error as NSError?)
+                    self.executeVideoCompletionWithURL(nil, error: error as NSError?)
                 } else {
-                    self._executeVideoCompletionWithURL(fileURL, error: error as NSError?)
+                    self.executeVideoCompletionWithURL(fileURL, error: error as NSError?)
                 }
             })
+        }
+    }
+}
+
+extension KMera {
+    open func addObservers() {
+        print("\(currentCameraDevice)")
+        currentCameraDevice?.addObserver(self, forKeyPath: "lensPosition", options: [.new], context: nil)
+        currentCameraDevice?.addObserver(self, forKeyPath: "exposureDuration", options: .new, context: nil)
+        currentCameraDevice?.addObserver(self, forKeyPath: "ISO", options: .new, context: nil)
+        currentCameraDevice?.addObserver(self, forKeyPath: "deviceWhiteBalanceGains", options: .new, context: nil)
+//        currentCameraDevice?.addObserver(self, forKeyPath: "adjustingFocus", options: .new, context: &adjustingFocusContext)
+//        currentCameraDevice?.addObserver(self, forKeyPath: "adjustingExposure", options: .new, context: &adjustingExposureContext)
+//        currentCameraDevice?.addObserver(self, forKeyPath: "adjustingWhiteBalance", options: .new, context: &adjustingWhiteBalanceContext)
+//
+    }
+    
+    
+    open func removeObservers() {
+        currentCameraDevice?.removeObserver(self, forKeyPath: "lensPosition", context: nil)
+        currentCameraDevice?.removeObserver(self, forKeyPath: "exposureDuration", context: nil)
+        currentCameraDevice?.removeObserver(self, forKeyPath: "ISO", context: nil)
+        currentCameraDevice?.removeObserver(self, forKeyPath: "deviceWhiteBalanceGains", context: nil)
+//        currentCameraDevice?.removeObserver(self, forKeyPath: "adjustingFocus", context: &adjustingFocusContext)
+//        currentCameraDevice?.removeObserver(self, forKeyPath: "adjustingExposure", context: &adjustingExposureContext)
+//        currentCameraDevice?.removeObserver(self, forKeyPath: "adjustingWhiteBalance", context: &adjustingWhiteBalanceContext)
+
+    }
+    
+    
+    
+    override open func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
+        
+        guard let key = keyPath, let changes = change else {
+            return
+        }
+        
+        if key == "lensPosition" {
+            let newValue = changes[.newKey] as! Float
+            obsLensPosition = "\(newValue)"
+            //print("lensPosition \(newValue)")
+        } else if key == "exposureDuration" {
+            let newValue = changes[.newKey]
+            obsExposureDuration = "\(newValue)"
+        } else if key == "ISO" {
+            let newValue = changes[.newKey] as! Float
+            obsISO = "\(newValue)"
+        }else if key == "deviceWhiteBalanceGains" {
+            let newValue = changes[.newKey]
+            obsDeviceWhiteBalanceGains = "\(newValue)"
         }
     }
 }
@@ -954,11 +1033,9 @@ extension KMera: AVCaptureFileOutputRecordingDelegate {
 extension KMera: UIGestureRecognizerDelegate {
     
     open func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        
         if gestureRecognizer.isKind(of: UIPinchGestureRecognizer.self) {
             beginZoomScale = zoomScale;
         }
-        
         return true
     }
     
