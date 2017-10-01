@@ -919,6 +919,7 @@ extension KMera {
                 
                 let imageData = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(sample!)
                 
+                // TODO: get info.
                 
                 imageCompletion(imageData, nil)
                 
