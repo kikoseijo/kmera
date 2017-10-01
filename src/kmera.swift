@@ -980,7 +980,7 @@ extension KMera: AVCaptureFileOutputRecordingDelegate {
 
 extension KMera {
     open func addObservers() {
-        print("\(currentCameraDevice)")
+        print("\(String(describing: currentCameraDevice))")
         currentCameraDevice?.addObserver(self, forKeyPath: "lensPosition", options: [.new], context: nil)
         currentCameraDevice?.addObserver(self, forKeyPath: "exposureDuration", options: .new, context: nil)
         currentCameraDevice?.addObserver(self, forKeyPath: "ISO", options: .new, context: nil)
@@ -1017,13 +1017,13 @@ extension KMera {
             //print("lensPosition \(newValue)")
         } else if key == "exposureDuration" {
             let newValue = changes[.newKey]
-            obsExposureDuration = "\(newValue)"
+            obsExposureDuration = "\(String(describing: newValue))"
         } else if key == "ISO" {
             let newValue = changes[.newKey] as! Float
             obsISO = "\(newValue)"
         }else if key == "deviceWhiteBalanceGains" {
             let newValue = changes[.newKey]
-            obsDeviceWhiteBalanceGains = "\(newValue)"
+            obsDeviceWhiteBalanceGains = "\(String(describing: newValue))"
         }
     }
 }
