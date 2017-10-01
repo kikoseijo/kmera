@@ -48,10 +48,10 @@ open class KMera: NSObject {
     open var showDebug = false
     open var displayAccessPermissions = true
     
-    open dynamic var obsLensPosition: String = ""
-    open dynamic var obsExposureDuration: String = ""
-    open dynamic var obsISO: String = ""
-    open dynamic var obsDeviceWhiteBalanceGains: String = ""
+    @objc open dynamic var obsLensPosition: String = ""
+    @objc open dynamic var obsExposureDuration: String = ""
+    @objc open dynamic var obsISO: String = ""
+    @objc open dynamic var obsDeviceWhiteBalanceGains: String = ""
     
     open var torchLevel : Float = 0.00 {
         didSet {
@@ -116,9 +116,9 @@ open class KMera: NSObject {
     
     /// The Bool property to determine if current device has front camera.
     open var hasFrontCamera: Bool = {
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-        for  device in devices!  {
-            let captureDevice = device as! AVCaptureDevice
+        let devices = AVCaptureDevice.devices(for: AVMediaType.video)
+        for  device in devices  {
+            let captureDevice = device 
             if (captureDevice.position == .front) {
                 return true
             }
@@ -128,9 +128,9 @@ open class KMera: NSObject {
     
     /// The Bool property to determine if current device has flash.
     open var hasFlash: Bool = {
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-        for  device in devices!  {
-            let captureDevice = device as! AVCaptureDevice
+        let devices = AVCaptureDevice.devices(for: AVMediaType.video)
+        for  device in devices  {
+            let captureDevice = device 
             if (captureDevice.position == .back) {
                 return captureDevice.hasFlash
             }
@@ -229,7 +229,7 @@ open class KMera: NSObject {
     
     fileprivate var backKamera:AVCaptureDevice?
     fileprivate var frontKamera:AVCaptureDevice?
-    fileprivate lazy var mic: AVCaptureDevice = AVCaptureDevice.defaultDevice(withMediaType: AVMediaTypeAudio)
+    fileprivate lazy var mic: AVCaptureDevice = AVCaptureDevice.default(for: AVMediaType.audio)!
     
     
     fileprivate var tempFilePath: URL = {
@@ -253,7 +253,7 @@ open class KMera: NSObject {
         return addLayerPreviewToView(view, newCameraOutputMode: newCameraOutputMode, completion: nil)
     }
     
-    open func addLayerPreviewToView(_ view: UIView, newCameraOutputMode: KMeraOutputMode, completion: ((Void) -> Void)?) -> KMeraState {
+    open func addLayerPreviewToView(_ view: UIView, newCameraOutputMode: KMeraOutputMode, completion: (() -> Void)?) -> KMeraState {
         if canLoadCamera() {
             if let _ = embeddingView {
                 if let validPreviewLayer = previewLayer {
@@ -267,7 +267,7 @@ open class KMera: NSObject {
                     validCompletion()
                 }
             } else {
-                setupCamera({ Void -> Void in
+                setupCamera({ () -> Void in
                     self.addPreviewLayer(view)
                     self.cameraOutputMode = newCameraOutputMode
                     if let validCompletion = completion {
@@ -281,9 +281,9 @@ open class KMera: NSObject {
     
 
     open func requestCameraPermission(_ completion: @escaping (Bool) -> Void) {
-        AVCaptureDevice.requestAccess(forMediaType: AVMediaTypeVideo, completionHandler: { (alowedAccess) -> Void in
+        AVCaptureDevice.requestAccess(for: AVMediaType.video, completionHandler: { (alowedAccess) -> Void in
             if self.cameraOutputMode == .videoWithMic {
-                AVCaptureDevice.requestAccess(forMediaType: AVMediaTypeAudio, completionHandler: { (alowedAccess) -> Void in
+                AVCaptureDevice.requestAccess(for: AVMediaType.audio, completionHandler: { (alowedAccess) -> Void in
                     DispatchQueue.main.sync(execute: { () -> Void in
                         completion(alowedAccess)
                     })
@@ -319,7 +319,7 @@ open class KMera: NSObject {
                 if cameraIsSetup {
                     stopAndRemoveCaptureSession()
                 }
-                setupCamera({Void -> Void in
+                setupCamera({ () -> Void in
                     if let validEmbeddingView = self.embeddingView {
                         self.addPreviewLayer(validEmbeddingView)
                     }
@@ -352,7 +352,7 @@ open class KMera: NSObject {
      */
     open func startRecordingVideo() {
         if cameraOutputMode != .stillImage {
-            getMovieOutput().startRecording(toOutputFileURL: tempFilePath, recordingDelegate: self)
+            getMovieOutput().startRecording(to: tempFilePath, recordingDelegate: self)
         } else {
             log(NSLocalizedString("Capture session output still image", comment:""), message: NSLocalizedString("I can only take pictures", comment:""))
         }
@@ -432,20 +432,20 @@ open class KMera: NSObject {
                 if torchLevel == 0.0 {
                     captureDevice.torchMode = .off
                 } else {
-                    try! captureDevice.setTorchModeOnWithLevel(torchLevel)
+                    try! captureDevice.setTorchModeOn(level: torchLevel)
                     print("TorchLevel: \(torchLevel)")
                     
                 }
             case .focus:
-                captureDevice.setFocusModeLockedWithLensPosition(Float(focusValue), completionHandler: nil)
+                captureDevice.setFocusModeLocked(lensPosition: Float(focusValue), completionHandler: nil)
             case .focusmode:
-                if let avFocusMode = AVCaptureFocusMode(rawValue: focusMode.rawValue), captureDevice.isFocusModeSupported(avFocusMode) {
+                if let avFocusMode = AVCaptureDevice.FocusMode(rawValue: focusMode.rawValue), captureDevice.isFocusModeSupported(avFocusMode) {
                     captureDevice.focusMode = avFocusMode
                 } else {
                     print("Focus mode not available as a settings.")
                 }
             case .flash:
-                if let avFlashMode = AVCaptureFlashMode(rawValue: focusMode.rawValue), captureDevice.isFlashModeSupported(avFlashMode) {
+                if let avFlashMode = AVCaptureDevice.FlashMode(rawValue: focusMode.rawValue), captureDevice.isFlashModeSupported(avFlashMode) {
                     captureDevice.flashMode = avFlashMode
                 } else {
                     print("Flash mode not available as a settings.")
@@ -464,7 +464,7 @@ open class KMera: NSObject {
     fileprivate func getMovieOutput() -> AVCaptureMovieFileOutput {
         var shouldReinitializeMovieOutput = movieOutput == nil
         if !shouldReinitializeMovieOutput {
-            if let connection = movieOutput!.connection(withMediaType: AVMediaTypeVideo) {
+            if let connection = movieOutput!.connection(with: AVMediaType.video) {
                 shouldReinitializeMovieOutput = shouldReinitializeMovieOutput || !connection.isActive
             }
         }
@@ -474,9 +474,9 @@ open class KMera: NSObject {
             movieOutput!.movieFragmentInterval = kCMTimeInvalid
             
             if let kSession = kSession {
-                if kSession.canAddOutput(movieOutput) {
+                if kSession.canAddOutput(movieOutput!) {
                     kSession.beginConfiguration()
-                    kSession.addOutput(movieOutput)
+                    kSession.addOutput(movieOutput!)
                     kSession.commitConfiguration()
                 }
             }
@@ -487,7 +487,7 @@ open class KMera: NSObject {
     fileprivate func getStillImageOutput() -> AVCaptureStillImageOutput {
         var shouldReinitializeStillImageOutput = stillImageOutput == nil
         if !shouldReinitializeStillImageOutput {
-            if let connection = stillImageOutput!.connection(withMediaType: AVMediaTypeVideo) {
+            if let connection = stillImageOutput!.connection(with: AVMediaType.video) {
                 shouldReinitializeStillImageOutput = shouldReinitializeStillImageOutput || !connection.isActive
             }
         }
@@ -495,9 +495,9 @@ open class KMera: NSObject {
             stillImageOutput = AVCaptureStillImageOutput()
             
             if let kSession = kSession {
-                if kSession.canAddOutput(stillImageOutput) {
+                if kSession.canAddOutput(stillImageOutput!) {
                     kSession.beginConfiguration()
-                    kSession.addOutput(stillImageOutput)
+                    kSession.addOutput(stillImageOutput!)
                     kSession.commitConfiguration()
                 }
             }
@@ -509,9 +509,9 @@ open class KMera: NSObject {
         var currentConnection: AVCaptureConnection?;
         switch cameraOutputMode {
         case .stillImage:
-            currentConnection = stillImageOutput?.connection(withMediaType: AVMediaTypeVideo)
+            currentConnection = stillImageOutput?.connection(with: AVMediaType.video)
         case .videoOnly, .videoWithMic:
-            currentConnection = getMovieOutput().connection(withMediaType: AVMediaTypeVideo)
+            currentConnection = getMovieOutput().connection(with: AVMediaType.video)
         }
         if let validPreviewLayer = previewLayer {
             if let validPreviewLayerConnection = validPreviewLayer.connection {
@@ -548,14 +548,14 @@ open class KMera: NSObject {
         return currentCameraState == .ready || (currentCameraState == .notDetermined && displayAccessPermissions)
     }
     
-    fileprivate func setupCamera(_ completion: @escaping (Void) -> Void) {
+    fileprivate func setupCamera(_ completion: @escaping () -> Void) {
         kSession = AVCaptureSession()
         
         sessionQueue.async(execute: {
             
             print("[KMera] init()")
-            let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-            for device in devices as! [AVCaptureDevice] {
+            let devices = AVCaptureDevice.devices(for: AVMediaType.video)
+            for device in devices {
                 if device.position == .back {
                     self.backKamera = device
                 }
@@ -566,7 +566,7 @@ open class KMera: NSObject {
             
             if let validCaptureSession = self.kSession {
                 validCaptureSession.beginConfiguration()
-                validCaptureSession.sessionPreset = AVCaptureSessionPresetHigh
+                validCaptureSession.sessionPreset = AVCaptureSession.Preset.high
                 self.changeCamera(self.cameraDevice)
                 self.setupOutputs()
                 self._setupOutputMode(self.cameraOutputMode, oldCameraOutputMode: nil)
@@ -616,7 +616,7 @@ open class KMera: NSObject {
     fileprivate func isCameraAvailable() -> KMeraState {
         let deviceHasCamera = UIImagePickerController.isCameraDeviceAvailable(UIImagePickerControllerCameraDevice.rear) || UIImagePickerController.isCameraDeviceAvailable(UIImagePickerControllerCameraDevice.front)
         if deviceHasCamera {
-            let authorizationStatus = AVCaptureDevice.authorizationStatus(forMediaType: AVMediaTypeVideo)
+            let authorizationStatus = AVCaptureDevice.authorizationStatus(for: AVMediaType.video)
             let userAgreedToUseIt = authorizationStatus == .authorized
             if userAgreedToUseIt {
                 return .ready
@@ -695,14 +695,14 @@ open class KMera: NSObject {
     fileprivate func _setupPreviewLayer() {
         if let validCaptureSession = kSession {
             previewLayer = AVCaptureVideoPreviewLayer(session: validCaptureSession)
-            previewLayer?.videoGravity = AVLayerVideoGravityResizeAspectFill
+            previewLayer?.videoGravity = AVLayerVideoGravity.resizeAspectFill
         }
     }
     
     fileprivate func changeCamera(_ deviceType: KMeraDevice) {
         if let validCaptureSession = kSession {
             validCaptureSession.beginConfiguration()
-            let inputs = validCaptureSession.inputs as! [AVCaptureInput]
+            let inputs = validCaptureSession.inputs 
             
             for input in inputs {
                 if let deviceInput = input as? AVCaptureDeviceInput {
@@ -744,11 +744,11 @@ open class KMera: NSObject {
     
     fileprivate func safeChangeFlashMode() {
         kSession?.beginConfiguration()
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-        for  device in devices!  {
-            let captureDevice = device as! AVCaptureDevice
-            if (captureDevice.position == AVCaptureDevicePosition.back) {
-                let avFlashMode = AVCaptureFlashMode(rawValue: flashMode.rawValue)
+        let devices = AVCaptureDevice.devices(for: AVMediaType.video)
+        for  device in devices  {
+            let captureDevice = device 
+            if (captureDevice.position == AVCaptureDevice.Position.back) {
+                let avFlashMode = AVCaptureDevice.FlashMode(rawValue: flashMode.rawValue)
                 if (captureDevice.isFlashModeSupported(avFlashMode!)) {
                     do {
                         try captureDevice.lockForConfiguration()
@@ -766,11 +766,11 @@ open class KMera: NSObject {
     
     fileprivate func safeChangeFocusMode() {
         kSession?.beginConfiguration()
-        let devices = AVCaptureDevice.devices(withMediaType: AVMediaTypeVideo)
-        for  device in devices!  {
-            let captureDevice = device as! AVCaptureDevice
-            if (captureDevice.position == AVCaptureDevicePosition.back) {
-                let avFocusMode = AVCaptureFocusMode(rawValue: focusMode.rawValue)
+        let devices = AVCaptureDevice.devices(for: AVMediaType.video)
+        for  device in devices  {
+            let captureDevice = device 
+            if (captureDevice.position == AVCaptureDevice.Position.back) {
+                let avFocusMode = AVCaptureDevice.FocusMode(rawValue: focusMode.rawValue)
                 if (captureDevice.isFocusModeSupported(avFocusMode!)) {
                     if focusMode == .locked {
                         safeChangeCameraValue(.focus, captureDevice: captureDevice)
@@ -789,17 +789,17 @@ open class KMera: NSObject {
     
     fileprivate func changeQualityMode(_ newCameraOutputQuality: KMeraOutputQuality) {
         if let validCaptureSession = kSession {
-            var sessionPreset = AVCaptureSessionPresetLow
+            var sessionPreset = AVCaptureSession.Preset.low
             switch (newCameraOutputQuality) {
             case .low:
-                sessionPreset = AVCaptureSessionPresetLow
+                sessionPreset = AVCaptureSession.Preset.low
             case .medium:
-                sessionPreset = AVCaptureSessionPresetMedium
+                sessionPreset = AVCaptureSession.Preset.medium
             case .high:
                 if cameraOutputMode == .stillImage {
-                    sessionPreset = AVCaptureSessionPresetPhoto
+                    sessionPreset = AVCaptureSession.Preset.photo
                 } else {
-                    sessionPreset = AVCaptureSessionPresetHigh
+                    sessionPreset = AVCaptureSession.Preset.high
                 }
             }
             if validCaptureSession.canSetSessionPreset(sessionPreset) {
@@ -815,7 +815,7 @@ open class KMera: NSObject {
     }
     
     fileprivate func disableAudioRecord() {
-        guard let inputs = kSession?.inputs as? [AVCaptureInput] else { return }
+        guard let inputs = kSession?.inputs else { return }
         
         for input in inputs {
             if let deviceInput = input as? AVCaptureDeviceInput {
@@ -906,7 +906,7 @@ extension KMera {
         }
         
         sessionQueue.async(execute: {
-            self.getStillImageOutput().captureStillImageAsynchronously(from: self.getStillImageOutput().connection(withMediaType: AVMediaTypeVideo), completionHandler: { [unowned self] sample, error in
+            self.getStillImageOutput().captureStillImageAsynchronously(from: self.getStillImageOutput().connection(with: AVMediaType.video)!, completionHandler: { [unowned self] sample, error in
                 
                 
                 guard error == nil else {
@@ -917,7 +917,7 @@ extension KMera {
                     return
                 }
                 
-                let imageData = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(sample)
+                let imageData = AVCaptureStillImageOutput.jpegStillImageNSDataRepresentation(sample!)
                 
                 
                 imageCompletion(imageData, nil)
@@ -932,14 +932,14 @@ extension KMera {
 
 extension KMera: AVCaptureFileOutputRecordingDelegate {
     
-    open func capture(_ captureOutput: AVCaptureFileOutput!, didStartRecordingToOutputFileAt fileURL: URL!, fromConnections connections: [Any]!) {
+    open func fileOutput(_ captureOutput: AVCaptureFileOutput, didStartRecordingTo fileURL: URL, from connections: [AVCaptureConnection]) {
         
     }
     
-    open func capture(_ captureOutput: AVCaptureFileOutput!, didFinishRecordingToOutputFileAt outputFileURL: URL!, fromConnections connections: [Any]!, error: Error!) {
+    open func fileOutput(_ captureOutput: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         
         if (error != nil) {
-            log(NSLocalizedString("Unable to save video to the iPhone", comment:""), message: error.localizedDescription)
+            log(NSLocalizedString("Unable to save video to the iPhone", comment:""), message: (error?.localizedDescription)!)
         } else {
             
             if savePhotosToUserLibrary {
